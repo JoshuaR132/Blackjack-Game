@@ -1,0 +1,73 @@
+body {
+  background-color: #006400;
+  color: white;
+  font-family: 'Segoe UI', Tahoma, sans-serif;
+  text-align: center;
+  margin: 0;
+  padding: 0;
+}
+
+h1 {
+  background-color: #003300;
+  padding: 20px 0;
+  margin: 0 0 20px;
+}
+
+.game-table {
+  display: flex;
+  justify-content: space-around;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.hand-section {
+  background-color: #004d00;
+  border-radius: 10px;
+  padding: 15px;
+  width: 300px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.5);
+}
+
+.hand {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.hand img {
+  width: 80px;
+  border-radius: 6px;
+  box-shadow: 0 3px 6px rgba(0,0,0,0.4);
+}
+
+.controls {
+  margin: 20px;
+}
+
+button {
+  background-color: #228B22;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  font-size: 16px;
+  margin: 5px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+button:hover:not(:disabled) {
+  background-color: #32CD32;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+#message {
+  font-size: 20px;
+  margin-top: 15px;
+  font-weight: bold;
+}
