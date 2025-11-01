@@ -1,36 +1,91 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Blackjack Game</title>
-  <link rel="stylesheet" href="style.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Blackjack — Animated + Betting + Hotseat</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <h1>Blackjack</h1>
-
-  <div class="game-table">
-    <div class="hand-section">
-      <h2>Dealer</h2>
-      <div id="dealer-hand" class="hand"></div>
-      <p id="dealer-score">Score: ?</p>
+  <header>
+    <h1>Blackjack</h1>
+    <div class="top-controls">
+      <label>
+        Players:
+        <select id="player-count">
+          <option value="1">1 (vs Dealer)</option>
+          <option value="2">2 (Hotseat)</option>
+        </select>
+      </label>
+      <button id="clear-storage">Clear Saved Data</button>
     </div>
+  </header>
 
-    <div class="hand-section">
-      <h2>Player</h2>
-      <div id="player-hand" class="hand"></div>
-      <p id="player-score">Score: 0</p>
-    </div>
-  </div>
+  <main>
+    <section class="table-area">
+      <div class="deck-area">
+        <div id="deck" class="deck">
+          <img src="images/cards/back.png" alt="deck" />
+        </div>
+        <div id="pot" class="pot" title="Bet pot"></div>
+      </div>
 
-  <div class="controls">
-    <button id="deal">Deal</button>
-    <button id="hit" disabled>Hit</button>
-    <button id="stand" disabled>Stand</button>
-    <button id="reset">Reset</button>
-  </div>
+      <div class="hands">
+        <div class="hand-section">
+          <h2>Dealer</h2>
+          <div id="dealer-hand" class="hand"></div>
+          <p id="dealer-score">Score: ?</p>
+        </div>
 
-  <p id="message"></p>
+        <div class="hand-section">
+          <h2>Player 1 <span id="p1-bank" class="bank-display"></span></h2>
+          <div id="player1-hand" class="hand"></div>
+          <p id="player1-score">Score: 0</p>
+          <div class="chips-row">
+            <button class="chip" data-value="1">£1</button>
+            <button class="chip" data-value="5">£5</button>
+            <button class="chip" data-value="10">£10</button>
+            <button class="chip" data-value="25">£25</button>
+            <button class="chip" data-value="50">£50</button>
+          </div>
+        </div>
+
+        <div id="player2-area" class="hand-section hidden">
+          <h2>Player 2 <span id="p2-bank" class="bank-display"></span></h2>
+          <div id="player2-hand" class="hand"></div>
+          <p id="player2-score">Score: 0</p>
+          <div class="chips-row">
+            <button class="chip" data-value="1">£1</button>
+            <button class="chip" data-value="5">£5</button>
+            <button class="chip" data-value="10">£10</button>
+            <button class="chip" data-value="25">£25</button>
+            <button class="chip" data-value="50">£50</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="controls">
+      <div class="game-buttons">
+        <button id="deal">Deal</button>
+        <button id="hit" disabled>Hit</button>
+        <button id="stand" disabled>Stand</button>
+        <button id="next-player" disabled>Next Player</button>
+        <button id="reset" disabled>Reset Round</button>
+      </div>
+
+      <div class="status">
+        <p id="message">Place your bet to begin.</p>
+        <div class="stats">
+          <p>Wins: <span id="wins">0</span> Losses: <span id="losses">0</span> Ties: <span id="ties">0</span></p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <small>Card filenames must be <code>&lt;Value&gt;&lt;Suit&gt;.png</code> — e.g. <code>10S.png</code>, <code>AH.png</code>. Put them in <code>images/cards/</code>.</small>
+  </footer>
 
   <script src="script.js"></script>
 </body>
