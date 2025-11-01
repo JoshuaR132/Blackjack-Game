@@ -1,151 +1,504 @@
-const suits = ["H", "D", "C", "S"];
-const values = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
+
+// ---------------------------
+// Basic deck & helpers
+// ---------------------------
+const suits = ["H","D","C","S"];
+const values = ["2","3","4","5","6","7","8","9","10","J","Q","K","A"];
 let deck = [];
-let playerHand = [];
-let dealerHand = [];
 
-const dealerHandDiv = document.getElementById("dealer-hand");
-const playerHandDiv = document.getElementById("player-hand");
-const dealerScoreText = document.getElementById("dealer-score");
-const playerScoreText = document.getElementById("player-score");
-const messageText = document.getElementById("message");
-
-const dealBtn = document.getElementById("deal");
-const hitBtn = document.getElementById("hit");
-const standBtn = document.getElementById("stand");
-const resetBtn = document.getElementById("reset");
-
-// Build and shuffle deck
-function createDeck() {
+function createDeck(){
   deck = [];
-  for (let s of suits) {
-    for (let v of values) {
+  for(const s of suits){
+    for(const v of values){
       deck.push({ value: v, suit: s });
     }
   }
   shuffle(deck);
 }
-
-function shuffle(array) {
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
+function shuffle(arr){
+  for(let i=arr.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [arr[i],arr[j]]=[arr[j],arr[i]];
   }
 }
-
-// Draw one card
-function drawCard() {
-  return deck.pop();
+function draw() { return deck.pop(); }
+function cardFilename(c){ return `images/cards/${c.value}${c.suit}.png`; }
+function cardValue(c){
+  if(["J","Q","K"].includes(c.value)) return 10;
+  if(c.value==="A") return 11;
+  return Number(c.value);
 }
-
-// Get value of a hand
-function calculateHandValue(hand) {
-  let total = 0;
-  let aces = 0;
-  for (let card of hand) {
-    if (["J", "Q", "K"].includes(card.value)) total += 10;
-    else if (card.value === "A") {
-      aces += 1;
-      total += 11;
-    } else total += Number(card.value);
+function calcHandValue(hand){
+  let total = 0, aces = 0;
+  for(const c of hand){
+    if(c.value==="A"){ aces++; total += 11; }
+    else if(["J","Q","K"].includes(c.value)) total += 10;
+    else total += Number(c.value);
   }
-  // Adjust for aces
-  while (total > 21 && aces > 0) {
-    total -= 10;
-    aces -= 1;
-  }
+  while(total>21 && aces>0){ total -= 10; aces--; }
   return total;
 }
 
-// Display hand visually
-function renderHand(hand, div, hideFirstCard = false) {
-  div.innerHTML = "";
-  hand.forEach((card, index) => {
-    const img = document.createElement("img");
-    if (hideFirstCard && index === 0) {
-      img.src = "images/cards/back.png";
-    } else {
-      img.src = `images/cards/${card.value}${card.suit}.png`;
-    }
-    div.appendChild(img);
+// ---------------------------
+// DOM elements
+// ---------------------------
+const dealerHandDiv = document.getElementById("dealer-hand");
+const player1HandDiv = document.getElementById("player1-hand");
+const player2HandDiv = document.getElementById("player2-hand");
+
+const dealerScoreText = document.getElementById("dealer-score");
+const p1ScoreText = document.getElementById("player1-score");
+const p2ScoreText = document.getElementById("player2-score");
+
+const dealBtn = document.getElementById("deal");
+const hitBtn = document.getElementById("hit");
+const standBtn = document.getElementById("stand");
+const resetBtn = document.getElementById("reset");
+const nextPlayerBtn = document.getElementById("next-player");
+
+const messageText = document.getElementById("message");
+const potDiv = document.getElementById("pot");
+const deckDiv = document.getElementById("deck");
+const playerCountSelect = document.getElementById("player-count");
+const player2Area = document.getElementById("player2-area");
+const p1BankDisplay = document.getElementById("p1-bank");
+const p2BankDisplay = document.getElementById("p2-bank");
+
+const winsText = document.getElementById("wins");
+const lossesText = document.getElementById("losses");
+const tiesText = document.getElementById("ties");
+const clearStorageBtn = document.getElementById("clear-storage");
+
+// Chip buttons live in DOM — listen delegately
+document.addEventListener("click", (e)=>{
+  if(e.target.matches(".chip")){
+    const val = Number(e.target.dataset.value);
+    placeBetForActivePlayer(val, e.target);
+  }
+});
+
+// ---------------------------
+// Game state
+// ---------------------------
+let playerCount = Number(playerCountSelect.value);
+let currentPlayerIndex = 0; // 0 -> player1, 1 -> player2
+let players = [
+  { hand: [], bankroll: 500, bet: 0, stats: { wins:0, losses:0, ties:0 } },
+  { hand: [], bankroll: 500, bet: 0, stats: { wins:0, losses:0, ties:0 } }
+];
+let dealer = { hand: [] };
+let roundActive = false;
+let dealingQueue = Promise.resolve();
+
+// ---------------------------
+// Persistence
+// ---------------------------
+function loadState(){
+  const raw = localStorage.getItem("blackjack_state_v1");
+  if(raw){
+    try{
+      const parsed = JSON.parse(raw);
+      if(parsed.players) players = parsed.players;
+      if(parsed.dealer) dealer = parsed.dealer;
+      if(parsed.playerCount) playerCount = parsed.playerCount;
+    }catch(e){ console.warn("Could not parse saved state", e); }
+  }
+  updateDisplays();
+}
+function saveState(){
+  const copy = {
+    players: players,
+    dealer: dealer,
+    playerCount: playerCount
+  };
+  localStorage.setItem("blackjack_state_v1", JSON.stringify(copy));
+}
+
+// ---------------------------
+// UI helpers & animations
+// ---------------------------
+function updateDisplays(){
+  p1BankDisplay.textContent = `£${players[0].bankroll}`;
+  p2BankDisplay.textContent = `£${players[1].bankroll}`;
+  winsText.textContent = players[currentPlayerIndex].stats.wins;
+  lossesText.textContent = players[currentPlayerIndex].stats.losses;
+  tiesText.textContent = players[currentPlayerIndex].stats.ties;
+}
+
+function clearHandsUI(){
+  dealerHandDiv.innerHTML = "";
+  player1HandDiv.innerHTML = "";
+  player2HandDiv.innerHTML = "";
+}
+
+// append real card image (non-animated)
+function appendCardImageTo(div, card, hide=false){
+  const img = document.createElement("img");
+  img.src = hide ? "images/cards/back.png" : cardFilename(card);
+  img.alt = `${card.value}${card.suit}`;
+  img.classList.add("dealt");
+  div.appendChild(img);
+  setTimeout(()=>img.classList.remove("dealt"), 220);
+}
+
+// animate a card from deck element to a target hand element (then attach real card)
+function animateDeal(card, targetHandDiv, hide=false){
+  // create clone image at deck position
+  const img = document.createElement("img");
+  img.src = "images/cards/back.png";
+  img.className = "moving-clone";
+  document.body.appendChild(img);
+
+  const deckRect = deckDivRect();
+  const destRect = handDestRect(targetHandDiv);
+
+  // place at deck
+  img.style.left = deckRect.left + "px";
+  img.style.top = deckRect.top + "px";
+  img.style.width = deckRect.width + "px";
+  img.style.height = deckRect.height + "px";
+  img.style.transform = "rotate(-6deg)";
+
+  // trigger move on next tick
+  requestAnimationFrame(() => {
+    const dx = destRect.left + (destRect.width - deckRect.width)/2;
+    const dy = destRect.top + (destRect.height - deckRect.height)/2;
+    img.style.transform = "translate(" + (dx - deckRect.left) + "px," + (dy - deckRect.top) + "px) rotate(0deg) scale(1)";
+    img.style.opacity = "1";
+  });
+
+  // after animation completes, attach real card into hand and remove clone
+  return new Promise(res => {
+    setTimeout(()=>{
+      document.body.removeChild(img);
+      appendCardImageTo(targetHandDiv, card, hide);
+      res();
+    }, 460);
   });
 }
 
-// Deal initial cards
-function deal() {
-  createDeck();
-  playerHand = [drawCard(), drawCard()];
-  dealerHand = [drawCard(), drawCard()];
-  renderHand(playerHand, playerHandDiv);
-  renderHand(dealerHand, dealerHandDiv, true);
-  playerScoreText.textContent = `Score: ${calculateHandValue(playerHand)}`;
-  dealerScoreText.textContent = `Score: ?`;
-
-  messageText.textContent = "";
-  dealBtn.disabled = true;
-  hitBtn.disabled = false;
-  standBtn.disabled = false;
+function deckDivRect(){
+  const el = deckDiv;
+  return el.getBoundingClientRect();
+}
+function handDestRect(div){
+  // approximate center of the hand area
+  const el = div;
+  return el.getBoundingClientRect();
 }
 
-// Player hits
-function hit() {
-  playerHand.push(drawCard());
-  renderHand(playerHand, playerHandDiv);
-  const playerScore = calculateHandValue(playerHand);
-  playerScoreText.textContent = `Score: ${playerScore}`;
+// chip animation: animate small chip element from chip button to pot
+function animateChip(fromEl, value){
+  const chipClone = document.createElement("div");
+  chipClone.className = "moving-clone chip-clone";
+  chipClone.textContent = value;
+  document.body.appendChild(chipClone);
 
-  if (playerScore > 21) {
-    endGame("You busted! Dealer wins.");
-  }
+  const fromRect = fromEl.getBoundingClientRect();
+  const potRect = potDiv.getBoundingClientRect();
+
+  chipClone.style.left = (fromRect.left) + "px";
+  chipClone.style.top = (fromRect.top) + "px";
+  chipClone.style.width = fromRect.width + "px";
+  chipClone.style.height = fromRect.height + "px";
+  chipClone.style.transform = "translateZ(0)";
+
+  requestAnimationFrame(() => {
+    const dx = potRect.left + (potRect.width - fromRect.width)/2;
+    const dy = potRect.top + (potRect.height - fromRect.height)/2;
+    chipClone.style.transform = `translate(${dx-fromRect.left}px,${dy-fromRect.top}px) scale(0.9)`;
+  });
+
+  setTimeout(()=>{ chipClone.remove(); }, 520);
 }
 
-// Player stands
-function stand() {
-  hitBtn.disabled = true;
-  standBtn.disabled = true;
-  renderHand(dealerHand, dealerHandDiv, false);
+// payout animation from pot to player bank display
+function animatePayout(toEl, value){
+  const chipClone = document.createElement("div");
+  chipClone.className = "moving-clone chip-clone";
+  chipClone.textContent = value;
+  document.body.appendChild(chipClone);
 
-  // Dealer plays
-  while (calculateHandValue(dealerHand) < 17) {
-    dealerHand.push(drawCard());
-    renderHand(dealerHand, dealerHandDiv, false);
-  }
+  const potRect = potDiv.getBoundingClientRect();
+  const toRect = toEl.getBoundingClientRect();
 
-  const playerScore = calculateHandValue(playerHand);
-  const dealerScore = calculateHandValue(dealerHand);
-  dealerScoreText.textContent = `Score: ${dealerScore}`;
+  chipClone.style.left = (potRect.left) + "px";
+  chipClone.style.top = (potRect.top) + "px";
 
-  if (dealerScore > 21) endGame("Dealer busted! You win!");
-  else if (dealerScore === playerScore) endGame("It's a tie!");
-  else if (playerScore > dealerScore) endGame("You win!");
-  else endGame("Dealer wins!");
+  requestAnimationFrame(() => {
+    const dx = toRect.left + (toRect.width - potRect.width)/2;
+    const dy = toRect.top + (toRect.height - potRect.height)/2;
+    chipClone.style.transform = `translate(${dx-potRect.left}px,${dy-potRect.top}px) scale(0.85)`;
+  });
+
+  setTimeout(()=>{ chipClone.remove(); }, 600);
 }
 
-// End game
-function endGame(msg) {
-  hitBtn.disabled = true;
-  standBtn.disabled = true;
-  dealBtn.disabled = true;
-  messageText.textContent = msg;
-  renderHand(dealerHand, dealerHandDiv, false);
-  dealerScoreText.textContent = `Score: ${calculateHandValue(dealerHand)}`;
+// ---------------------------
+// Betting & controls
+// ---------------------------
+function placeBetForActivePlayer(amount, sourceEl){
+  if(roundActive) { showMessage("Round in progress — cannot bet now."); return; }
+  const pl = players[currentPlayerIndex];
+  if(amount > pl.bankroll){ showMessage("You don't have enough for that bet."); return; }
+  pl.bet += amount;
+  pl.bankroll -= amount;
+  animateChip(sourceEl, amount);
+  updatePotUI();
+  updateDisplays();
+  saveState();
+  showMessage(`Player ${currentPlayerIndex+1} bet £${pl.bet}. Click Deal when ready.`);
 }
 
-// Reset
-function reset() {
-  playerHand = [];
-  dealerHand = [];
-  playerHandDiv.innerHTML = "";
-  dealerHandDiv.innerHTML = "";
+function updatePotUI(){
+  const totalPot = players.reduce((s,p)=>s+p.bet,0);
+  potDiv.textContent = totalPot > 0 ? `£${totalPot}` : "";
+}
+
+// ---------------------------
+// Game flow: dealing, hit/stand, dealer AI
+// ---------------------------
+function resetRoundState(){
+  players.forEach(p => { p.hand = []; p.bet = 0; });
+  dealer.hand = [];
+  roundActive = false;
+  currentPlayerIndex = 0;
+  clearHandsUI();
+  updateDisplays();
+  updatePotUI();
   dealerScoreText.textContent = "Score: ?";
-  playerScoreText.textContent = "Score: 0";
-  messageText.textContent = "";
-  dealBtn.disabled = false;
+  p1ScoreText.textContent = "Score: 0";
+  p2ScoreText.textContent = "Score: 0";
   hitBtn.disabled = true;
   standBtn.disabled = true;
+  nextPlayerBtn.disabled = true;
+  resetBtn.disabled = true;
+  dealBtn.disabled = false;
+  showMessage("Place your bet to begin.");
+  saveState();
 }
 
-dealBtn.addEventListener("click", deal);
-hitBtn.addEventListener("click", hit);
-standBtn.addEventListener("click", stand);
-resetBtn.addEventListener("click", reset);
+async function deal(){
+  // require at least one player's bet
+  const anyBet = players.slice(0,playerCount).some(p=>p.bet>0);
+  if(!anyBet){ showMessage("Place a bet first."); return; }
+
+  dealBtn.disabled = true;
+  roundActive = true;
+  createDeck();
+
+  // clear hands and UI
+  dealer.hand = [];
+  players.forEach((p,i)=>{ p.hand = []; if(i>=playerCount) p.bet = 0; });
+
+  clearHandsUI();
+  updatePotUI();
+
+  // initial deal order: player1, player2 (if present), dealer, repeat
+  // We will animate sequentially to look nice.
+  // Dealer's first card is hidden.
+  const dealOrder = [];
+  for(let r=0;r<2;r++){
+    for(let p=0;p<playerCount;p++){
+      dealOrder.push({type:"player", playerIndex:p});
+    }
+    dealOrder.push({type:"dealer"});
+  }
+
+  // queue dealing animations
+  for(const step of dealOrder){
+    if(step.type==="player"){
+      const card = draw(); players[step.playerIndex].hand.push(card);
+      const targetDiv = step.playerIndex===0 ? player1HandDiv : player2HandDiv;
+      // each step waited in sequence to avoid race conditions
+      // hide nothing for players
+      await animateDeal(card, targetDiv, false);
+      // small pause
+      await sleep(80);
+      // update that player's score
+      const sc = calcHandValue(players[step.playerIndex].hand);
+      if(step.playerIndex===0) p1ScoreText.textContent = `Score: ${sc}`;
+      else p2ScoreText.textContent = `Score: ${sc}`;
+    } else {
+      const card = draw(); dealer.hand.push(card);
+      // first dealer card hidden only while rendering; reveal later.
+      const hideFirst = dealer.hand.length===1;
+      await animateDeal(card, dealerHandDiv, hideFirst);
+      await sleep(80);
+    }
+  }
+
+  // enable controls for player 1
+  currentPlayerIndex = 0;
+  enablePlayerControlsFor(currentPlayerIndex);
+  resetBtn.disabled = false;
+  nextPlayerBtn.disabled = playerCount<2;
+  showMessage(`Player ${currentPlayerIndex+1}'s turn — Hit or Stand.`);
+  saveState();
+}
+
+function enablePlayerControlsFor(index){
+  // only enable hit/stand if player hasn't busted or finished
+  const pl = players[index];
+  const sc = calcHandValue(pl.hand);
+  if(sc>21){
+    hitBtn.disabled = true; standBtn.disabled = true;
+  } else {
+    hitBtn.disabled = false; standBtn.disabled = false;
+  }
+  // update stats box for active player
+  winsText.textContent = pl.stats.wins;
+  lossesText.textContent = pl.stats.losses;
+  tiesText.textContent = pl.stats.ties;
+}
+
+// hit for current player
+async function hit(){
+  if(!roundActive) return;
+  const pl = players[currentPlayerIndex];
+  const card = draw();
+  pl.hand.push(card);
+  const targetDiv = currentPlayerIndex===0 ? player1HandDiv : player2HandDiv;
+  await animateDeal(card, targetDiv, false);
+  const sc = calcHandValue(pl.hand);
+  if(currentPlayerIndex===0) p1ScoreText.textContent = `Score: ${sc}`;
+  else p2ScoreText.textContent = `Score: ${sc}`;
+
+  if(sc>21){
+    showMessage(`Player ${currentPlayerIndex+1} busted!`);
+    hitBtn.disabled = true; standBtn.disabled = true;
+  } else {
+    showMessage(`Player ${currentPlayerIndex+1} — Score: ${sc}.`);
+  }
+  saveState();
+}
+
+async function stand(){
+  hitBtn.disabled = true; standBtn.disabled = true;
+  showMessage(`Player ${currentPlayerIndex+1} stands on ${calcHandValue(players[currentPlayerIndex].hand)}.`);
+  // If 2 players and current was player1, enable next player
+  if(playerCount===2 && currentPlayerIndex===0){
+    nextPlayerBtn.disabled = false;
+    showMessage("Click Next Player to continue with Player 2.");
+  } else {
+    // All players done — reveal dealer and complete round
+    await dealerPlayAndResolve();
+  }
+  saveState();
+}
+
+nextPlayerBtn.addEventListener("click", ()=>{
+  // switch to player 2
+  currentPlayerIndex = 1;
+  enablePlayerControlsFor(currentPlayerIndex);
+  nextPlayerBtn.disabled = true;
+  showMessage(`Player ${currentPlayerIndex+1}'s turn — Hit or Stand.`);
+});
+
+async function dealerPlayAndResolve(){
+  // reveal dealer's hidden card (re-render dealer hand with reveal)
+  dealerHandDiv.innerHTML = "";
+  dealer.hand.forEach(c=> appendCardImageTo(dealerHandDiv, c, false));
+  let dealerScore = calcHandValue(dealer.hand);
+  dealerScoreText.textContent = `Score: ${dealerScore}`;
+  // dealer hits until 17+
+  while(dealerScore < 17){
+    await sleep(380);
+    const c = draw();
+    dealer.hand.push(c);
+    await animateDeal(c, dealerHandDiv, false);
+    dealerScore = calcHandValue(dealer.hand);
+    dealerScoreText.textContent = `Score: ${dealerScore}`;
+  }
+
+  // evaluate each player
+  for(let pi=0; pi<playerCount; pi++){
+    const pl = players[pi];
+    const pScore = calcHandValue(pl.hand);
+    const dScore = dealerScore;
+    let resultText;
+    if(pScore>21){
+      resultText = "bust";
+      pl.stats.losses++;
+    } else if(dScore>21){
+      resultText = "dealer-bust";
+      pl.stats.wins++;
+      pl.bankroll += pl.bet * 2; // win pays 1:1 plus original stake
+      // payout animation
+      const bankEl = pi===0 ? p1BankDisplay : p2BankDisplay;
+      animatePayout(bankEl, pl.bet*2);
+    } else if(pScore === dScore){
+      resultText = "push";
+      pl.stats.ties++;
+      pl.bankroll += pl.bet; // return stake
+      animatePayout(pi===0 ? p1BankDisplay : p2BankDisplay, pl.bet);
+    } else if(pScore > dScore){
+      resultText = "win";
+      pl.stats.wins++;
+      pl.bankroll += pl.bet * 2; // 1:1 payout
+      animatePayout(pi===0 ? p1BankDisplay : p2BankDisplay, pl.bet*2);
+    } else {
+      resultText = "lose";
+      pl.stats.losses++;
+      // bet already deducted
+    }
+  }
+
+  // reset bets
+  players.forEach((p,i)=> p.bet = 0);
+
+  // show summary
+  const messages = players.slice(0,playerCount).map((p,i)=>{
+    const s = calcHandValue(p.hand);
+    const d = calcHandValue(dealer.hand);
+    let r = "Loss";
+    if(s>21) r = "Busted";
+    else if(d>21) r = "Dealer busted — Win";
+    else if(s===d) r = "Tie";
+    else if(s>d) r = "Win";
+    else r = "Loss";
+    return `P${i+1}: ${s} — ${r}`;
+  });
+  showMessage(`Round over. Dealer: ${calcHandValue(dealer.hand)}. Results: ${messages.join(" | ")}`);
+
+  // UI updates
+  updateDisplays();
+  updatePotUI();
+  roundActive = false;
+  resetBtn.disabled = false;
+  hitBtn.disabled = true; standBtn.disabled = true;
+  saveState();
+}
+
+// Reset for next round (keeps bankroll/stats)
+resetBtn.addEventListener("click", ()=>{ resetRoundState(); });
+
+// Deal/hit/stand bindings
+dealBtn.addEventListener("click", ()=> deal());
+hitBtn.addEventListener("click", ()=> hit());
+standBtn.addEventListener("click", ()=> stand());
+
+// player count change
+playerCountSelect.addEventListener("change", (e)=>{
+  playerCount = Number(e.target.value);
+  player2Area.classList.toggle("hidden", playerCount<2);
+  resetRoundState();
+  saveState();
+});
+
+// Clear saved storage
+clearStorageBtn.addEventListener("click", ()=>{
+  if(confirm("Clear saved bankrolls & stats? This cannot be undone.")){
+    localStorage.removeItem("blackjack_state_v1");
+    location.reload();
+  }
+});
+
+// small helper
+function sleep(ms){ return new Promise(res=>setTimeout(res,ms)); }
+function showMessage(txt){ messageText.textContent = txt; }
+
+// initialize
+createDeck();
+loadState();
+resetRoundState();
