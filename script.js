@@ -21,7 +21,14 @@ function shuffle(arr){
     [arr[i],arr[j]]=[arr[j],arr[i]];
   }
 }
-function draw() { return deck.pop(); }
+function draw(){
+  // guard: reshuffle if deck empty
+  if(deck.length === 0){
+    createDeck();
+    showMessage("Reshuffling deck...");
+  }
+  return deck.pop();
+}
 function cardFilename(c){ return `images/cards/${c.value}${c.suit}.png`; }
 function cardValue(c){
   if(["J","Q","K"].includes(c.value)) return 10;
@@ -69,18 +76,10 @@ const lossesText = document.getElementById("losses");
 const tiesText = document.getElementById("ties");
 const clearStorageBtn = document.getElementById("clear-storage");
 
-// Chip buttons live in DOM — listen delegately
-document.addEventListener("click", (e)=>{
-  if(e.target.matches(".chip")){
-    const val = Number(e.target.dataset.value);
-    placeBetForActivePlayer(val, e.target);
-  }
-});
-
 // ---------------------------
 // Game state
 // ---------------------------
-let playerCount = Number(playerCountSelect.value);
+let playerCount = Number(playerCountSelect ? playerCountSelect.value : 1);
 let currentPlayerIndex = 0; // 0 -> player1, 1 -> player2
 let players = [
   { hand: [], bankroll: 500, bet: 0, stats: { wins:0, losses:0, ties:0 } },
@@ -93,36 +92,35 @@ let dealingQueue = Promise.resolve();
 // ---------------------------
 // Persistence
 // ---------------------------
+// ---------------------------
+// Persistence
+// ---------------------------
 function loadState(){
-  const raw = localStorage.getItem("blackjack_state_v1");
-  if(raw){
-    try{
-      const parsed = JSON.parse(raw);
-      if(parsed.players) players = parsed.players;
-      if(parsed.dealer) dealer = parsed.dealer;
-      if(parsed.playerCount) playerCount = parsed.playerCount;
-    }catch(e){ console.warn("Could not parse saved state", e); }
-  }
+  try{
+    const raw = localStorage.getItem("blackjack_state_v1");
+    if(!raw) return;
+    const parsed = JSON.parse(raw);
+    if(parsed.players) players = parsed.players;
+    if(parsed.dealer) dealer = parsed.dealer;
+    if(parsed.playerCount) playerCount = parsed.playerCount;
+  }catch(e){ console.warn("Could not parse saved state", e); }
   updateDisplays();
 }
 function saveState(){
-  const copy = {
-    players: players,
-    dealer: dealer,
-    playerCount: playerCount
-  };
-  localStorage.setItem("blackjack_state_v1", JSON.stringify(copy));
+  const copy = { players, dealer, playerCount };
+  try{ localStorage.setItem("blackjack_state_v1", JSON.stringify(copy)); }
+  catch(e){ console.warn("Could not save state", e); }
 }
 
 // ---------------------------
 // UI helpers & animations
 // ---------------------------
 function updateDisplays(){
-  p1BankDisplay.textContent = `£${players[0].bankroll}`;
-  p2BankDisplay.textContent = `£${players[1].bankroll}`;
-  winsText.textContent = players[currentPlayerIndex].stats.wins;
-  lossesText.textContent = players[currentPlayerIndex].stats.losses;
-  tiesText.textContent = players[currentPlayerIndex].stats.ties;
+  if(p1BankDisplay) p1BankDisplay.textContent = `£${players[0].bankroll}`;
+  if(p2BankDisplay) p2BankDisplay.textContent = `£${players[1].bankroll}`;
+  if(winsText) winsText.textContent = players[currentPlayerIndex].stats.wins;
+  if(lossesText) lossesText.textContent = players[currentPlayerIndex].stats.losses;
+  if(tiesText) tiesText.textContent = players[currentPlayerIndex].stats.ties;
 }
 
 function clearHandsUI(){
@@ -139,11 +137,11 @@ function appendCardImageTo(div, card, hide=false){
   img.classList.add("dealt");
   div.appendChild(img);
   setTimeout(()=>img.classList.remove("dealt"), 220);
+  playSound("deal");
 }
 
 // animate a card from deck element to a target hand element (then attach real card)
 function animateDeal(card, targetHandDiv, hide=false){
-  // create clone image at deck position
   const img = document.createElement("img");
   img.src = "images/cards/back.png";
   img.className = "moving-clone";
@@ -152,14 +150,12 @@ function animateDeal(card, targetHandDiv, hide=false){
   const deckRect = deckDivRect();
   const destRect = handDestRect(targetHandDiv);
 
-  // place at deck
   img.style.left = deckRect.left + "px";
   img.style.top = deckRect.top + "px";
   img.style.width = deckRect.width + "px";
   img.style.height = deckRect.height + "px";
   img.style.transform = "rotate(-6deg)";
 
-  // trigger move on next tick
   requestAnimationFrame(() => {
     const dx = destRect.left + (destRect.width - deckRect.width)/2;
     const dy = destRect.top + (destRect.height - deckRect.height)/2;
@@ -167,28 +163,22 @@ function animateDeal(card, targetHandDiv, hide=false){
     img.style.opacity = "1";
   });
 
-  // after animation completes, attach real card into hand and remove clone
   return new Promise(res => {
     setTimeout(()=>{
-      document.body.removeChild(img);
+      if(img.parentElement) document.body.removeChild(img);
       appendCardImageTo(targetHandDiv, card, hide);
+      playSound("deal");
       res();
     }, 460);
   });
 }
 
-function deckDivRect(){
-  const el = deckDiv;
-  return el.getBoundingClientRect();
-}
-function handDestRect(div){
-  // approximate center of the hand area
-  const el = div;
-  return el.getBoundingClientRect();
-}
+function deckDivRect(){ return deckDiv.getBoundingClientRect(); }
+function handDestRect(div){ return div.getBoundingClientRect(); }
 
 // chip animation: animate small chip element from chip button to pot
 function animateChip(fromEl, value){
+  playSound("chip");
   const chipClone = document.createElement("div");
   chipClone.className = "moving-clone chip-clone";
   chipClone.textContent = value;
@@ -201,7 +191,6 @@ function animateChip(fromEl, value){
   chipClone.style.top = (fromRect.top) + "px";
   chipClone.style.width = fromRect.width + "px";
   chipClone.style.height = fromRect.height + "px";
-  chipClone.style.transform = "translateZ(0)";
 
   requestAnimationFrame(() => {
     const dx = potRect.left + (potRect.width - fromRect.width)/2;
@@ -266,14 +255,14 @@ function resetRoundState(){
   clearHandsUI();
   updateDisplays();
   updatePotUI();
-  dealerScoreText.textContent = "Score: ?";
-  p1ScoreText.textContent = "Score: 0";
-  p2ScoreText.textContent = "Score: 0";
-  hitBtn.disabled = true;
-  standBtn.disabled = true;
-  nextPlayerBtn.disabled = true;
-  resetBtn.disabled = true;
-  dealBtn.disabled = false;
+  if(dealerScoreText) dealerScoreText.textContent = "Score: ?";
+  if(p1ScoreText) p1ScoreText.textContent = "Score: 0";
+  if(p2ScoreText) p2ScoreText.textContent = "Score: 0";
+  if(hitBtn) hitBtn.disabled = true;
+  if(standBtn) standBtn.disabled = true;
+  if(nextPlayerBtn) nextPlayerBtn.disabled = true;
+  if(resetBtn) resetBtn.disabled = true;
+  if(dealBtn) dealBtn.disabled = false;
   showMessage("Place your bet to begin.");
   saveState();
 }
@@ -282,8 +271,7 @@ async function deal(){
   // require at least one player's bet
   const anyBet = players.slice(0,playerCount).some(p=>p.bet>0);
   if(!anyBet){ showMessage("Place a bet first."); return; }
-
-  dealBtn.disabled = true;
+  if(dealBtn) dealBtn.disabled = true;
   roundActive = true;
   createDeck();
 
@@ -295,61 +283,45 @@ async function deal(){
   updatePotUI();
 
   // initial deal order: player1, player2 (if present), dealer, repeat
-  // We will animate sequentially to look nice.
-  // Dealer's first card is hidden.
   const dealOrder = [];
   for(let r=0;r<2;r++){
-    for(let p=0;p<playerCount;p++){
-      dealOrder.push({type:"player", playerIndex:p});
-    }
+    for(let p=0;p<playerCount;p++) dealOrder.push({type:"player", playerIndex:p});
     dealOrder.push({type:"dealer"});
   }
 
-  // queue dealing animations
   for(const step of dealOrder){
     if(step.type==="player"){
       const card = draw(); players[step.playerIndex].hand.push(card);
       const targetDiv = step.playerIndex===0 ? player1HandDiv : player2HandDiv;
-      // each step waited in sequence to avoid race conditions
-      // hide nothing for players
       await animateDeal(card, targetDiv, false);
-      // small pause
       await sleep(80);
-      // update that player's score
       const sc = calcHandValue(players[step.playerIndex].hand);
-      if(step.playerIndex===0) p1ScoreText.textContent = `Score: ${sc}`;
-      else p2ScoreText.textContent = `Score: ${sc}`;
+      if(step.playerIndex===0 && p1ScoreText) p1ScoreText.textContent = `Score: ${sc}`;
+      else if(p2ScoreText) p2ScoreText.textContent = `Score: ${sc}`;
     } else {
       const card = draw(); dealer.hand.push(card);
-      // first dealer card hidden only while rendering; reveal later.
       const hideFirst = dealer.hand.length===1;
       await animateDeal(card, dealerHandDiv, hideFirst);
       await sleep(80);
     }
   }
 
-  // enable controls for player 1
   currentPlayerIndex = 0;
   enablePlayerControlsFor(currentPlayerIndex);
-  resetBtn.disabled = false;
-  nextPlayerBtn.disabled = playerCount<2;
+  if(resetBtn) resetBtn.disabled = false;
+  if(nextPlayerBtn) nextPlayerBtn.disabled = playerCount<2;
   showMessage(`Player ${currentPlayerIndex+1}'s turn — Hit or Stand.`);
   saveState();
 }
 
 function enablePlayerControlsFor(index){
-  // only enable hit/stand if player hasn't busted or finished
   const pl = players[index];
   const sc = calcHandValue(pl.hand);
-  if(sc>21){
-    hitBtn.disabled = true; standBtn.disabled = true;
-  } else {
-    hitBtn.disabled = false; standBtn.disabled = false;
-  }
-  // update stats box for active player
-  winsText.textContent = pl.stats.wins;
-  lossesText.textContent = pl.stats.losses;
-  tiesText.textContent = pl.stats.ties;
+  if(hitBtn) hitBtn.disabled = sc>21;
+  if(standBtn) standBtn.disabled = sc>21;
+  if(winsText) winsText.textContent = pl.stats.wins;
+  if(lossesText) lossesText.textContent = pl.stats.losses;
+  if(tiesText) tiesText.textContent = pl.stats.ties;
 }
 
 // hit for current player
@@ -361,12 +333,13 @@ async function hit(){
   const targetDiv = currentPlayerIndex===0 ? player1HandDiv : player2HandDiv;
   await animateDeal(card, targetDiv, false);
   const sc = calcHandValue(pl.hand);
-  if(currentPlayerIndex===0) p1ScoreText.textContent = `Score: ${sc}`;
-  else p2ScoreText.textContent = `Score: ${sc}`;
+  if(currentPlayerIndex===0 && p1ScoreText) p1ScoreText.textContent = `Score: ${sc}`;
+  else if(p2ScoreText) p2ScoreText.textContent = `Score: ${sc}`;
 
   if(sc>21){
     showMessage(`Player ${currentPlayerIndex+1} busted!`);
-    hitBtn.disabled = true; standBtn.disabled = true;
+    if(hitBtn) hitBtn.disabled = true;
+    if(standBtn) standBtn.disabled = true;
   } else {
     showMessage(`Player ${currentPlayerIndex+1} — Score: ${sc}.`);
   }
@@ -374,21 +347,19 @@ async function hit(){
 }
 
 async function stand(){
-  hitBtn.disabled = true; standBtn.disabled = true;
+  if(hitBtn) hitBtn.disabled = true;
+  if(standBtn) standBtn.disabled = true;
   showMessage(`Player ${currentPlayerIndex+1} stands on ${calcHandValue(players[currentPlayerIndex].hand)}.`);
-  // If 2 players and current was player1, enable next player
   if(playerCount===2 && currentPlayerIndex===0){
-    nextPlayerBtn.disabled = false;
+    if(nextPlayerBtn) nextPlayerBtn.disabled = false;
     showMessage("Click Next Player to continue with Player 2.");
   } else {
-    // All players done — reveal dealer and complete round
     await dealerPlayAndResolve();
   }
   saveState();
 }
 
-nextPlayerBtn.addEventListener("click", ()=>{
-  // switch to player 2
+if(nextPlayerBtn) nextPlayerBtn.addEventListener("click", ()=>{
   currentPlayerIndex = 1;
   enablePlayerControlsFor(currentPlayerIndex);
   nextPlayerBtn.disabled = true;
@@ -494,6 +465,15 @@ clearStorageBtn.addEventListener("click", ()=>{
   }
 });
 
+// Chip buttons live in DOM — delegated handler (single listener)
+document.addEventListener("click", (e)=>{
+  const chip = e.target.closest ? e.target.closest('.chip') : (e.target.matches && e.target.matches('.chip') ? e.target : null);
+  if(!chip) return;
+  const val = Number(chip.dataset.value);
+  if(Number.isNaN(val)) return;
+  placeBetForActivePlayer(val, chip);
+});
+
 // small helper
 function sleep(ms){ return new Promise(res=>setTimeout(res,ms)); }
 function showMessage(txt){ messageText.textContent = txt; }
@@ -502,3 +482,23 @@ function showMessage(txt){ messageText.textContent = txt; }
 createDeck();
 loadState();
 resetRoundState();
+
+// ---------------------------
+// Sound Effects 🎵
+// ---------------------------
+const sounds = {
+  deal: new Audio("sounds/deal.wav"),
+  chip: new Audio("sounds/chip.wav"),
+  win: new Audio("sounds/win.wav"),
+  lose: new Audio("sounds/lose.wav"),
+  tie: new Audio("sounds/tie.wav"),
+  click: new Audio("sounds/click.wav")
+};
+
+function playSound(name) {
+  const s = sounds[name];
+  if (!s) return;
+  s.currentTime = 0; // restart sound if it's already playing
+  s.play().catch(() => {}); // ignore autoplay restrictions
+}
+
