@@ -32,8 +32,8 @@ A modern, browser-based **Blackjack game** built with **HTML, CSS, and JavaScrip
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/<your-username>/blackjack-royale.git
-cd blackjack-royale
+git clone https://github.com/<your-username>/Blackjack-Game.git
+cd Blackjack-Game
 ````
 
 ### 2. File structure
@@ -52,8 +52,8 @@ blackjack-royale/
 │   └── click.mp3
 ├── images/
 │   ├── cards/
-│   │   ├── 2_of_hearts.png
-│   │   ├── 3_of_hearts.png
+│   │   ├── 2H.png
+│   │   ├── 3H.png
 │   │   └── ... (all 52 cards)
 │   └── card_back.png
 └── docs/
@@ -103,7 +103,7 @@ The game uses the browser’s `localStorage` to store:
 * Active player turn
 * Deck and state between sessions
 
-You can clear progress via browser dev tools → Application → Local Storage → `blackjack-royale`.
+You can clear progress via browser dev tools → Application → Local Storage → `Blackjack-Game`.
 
 ---
 
