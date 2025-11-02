@@ -60,10 +60,6 @@ blackjack-royale/
     └── preview.png (optional)
 ```
 
-> 🃏 **Card image naming format**:
-> `"<rank>_of_<suit>.png"`
-> Example: `ace_of_spades.png`, `10_of_hearts.png`
-
 ---
 
 ## How to Play
