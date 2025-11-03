@@ -60,6 +60,8 @@ const hitBtn = document.getElementById("hit");
 const standBtn = document.getElementById("stand");
 const resetBtn = document.getElementById("reset");
 const nextPlayerBtn = document.getElementById("next-player");
+const doubleBtn = document.getElementById("double");
+const splitBtn = document.getElementById("split");
 
 const messageText = document.getElementById("message");
 const potDiv = document.getElementById("pot");
@@ -123,6 +125,39 @@ function updateDisplays(){
   winsText.textContent = players[currentPlayerIndex].stats.wins;
   lossesText.textContent = players[currentPlayerIndex].stats.losses;
   tiesText.textContent = players[currentPlayerIndex].stats.ties;
+  // re-render hands to ensure split UI is consistent
+  renderPlayerHands(0);
+  renderPlayerHands(1);
+}
+
+// render a player's hands (handles split UI)
+function renderPlayerHands(index){
+  const pl = players[index];
+  const handDiv = index===0 ? player1HandDiv : player2HandDiv;
+  handDiv.innerHTML = "";
+  // primary hand
+  const primary = document.createElement('div');
+  primary.className = 'primary-hand';
+  for(const c of (pl.firstHand || pl.hand)){
+    const img = document.createElement('img');
+    img.src = cardFilename(c);
+    img.alt = `${c.value}${c.suit}`;
+    primary.appendChild(img);
+  }
+  handDiv.appendChild(primary);
+  // split hand
+  if(pl.split){
+    let splitContainer = handDiv.querySelector('.split-hand');
+    if(!splitContainer){ splitContainer = document.createElement('div'); splitContainer.className='split-hand'; }
+    splitContainer.innerHTML = '';
+    for(const c of pl.split.hand){
+      const img = document.createElement('img');
+      img.src = cardFilename(c);
+      img.alt = `${c.value}${c.suit}`;
+      splitContainer.appendChild(img);
+    }
+    handDiv.appendChild(splitContainer);
+  }
 }
 
 function clearHandsUI(){
@@ -250,6 +285,8 @@ function resetRoundState(){
   p2ScoreText.textContent = "Score: 0";
   hitBtn.disabled = true;
   standBtn.disabled = true;
+  doubleBtn.disabled = true;
+  splitBtn.disabled = true;
   nextPlayerBtn.disabled = playerCount<2;
   resetBtn.disabled = true;
   dealBtn.disabled = false;
@@ -300,11 +337,18 @@ async function deal(){
 }
 
 function enablePlayerControlsFor(i){
+  const pl = players[i];
   hitBtn.disabled = false;
   standBtn.disabled = false;
-  winsText.textContent = players[i].stats.wins;
-  lossesText.textContent = players[i].stats.losses;
-  tiesText.textContent = players[i].stats.ties;
+  winsText.textContent = pl.stats.wins;
+  lossesText.textContent = pl.stats.losses;
+  tiesText.textContent = pl.stats.ties;
+  // Double: allowed only as first action on a two-card hand and if player can cover the additional bet
+  const canDouble = roundActive && pl.bet>0 && (pl.hand.length===2) && pl.bankroll>=pl.bet && !pl._playingSplitSecond;
+  doubleBtn.disabled = !canDouble;
+  // Split: allowed if two cards of the same rank and player can cover a second bet, and not already split
+  const canSplit = roundActive && pl.bet>0 && (pl.hand.length===2) && (pl.hand[0].value===pl.hand[1].value) && pl.bankroll>=pl.bet && !pl.split;
+  splitBtn.disabled = !canSplit;
 }
 
 async function hit(){
@@ -312,7 +356,8 @@ async function hit(){
   const pl = players[currentPlayerIndex];
   const card = draw();
   pl.hand.push(card);
-  await animateDeal(card, currentPlayerIndex===0 ? player1HandDiv : player2HandDiv);
+  const targetDiv = getHandDivForPlayer(currentPlayerIndex);
+  await animateDeal(card, targetDiv);
   const sc = calcHandValue(pl.hand);
   (currentPlayerIndex===0 ? p1ScoreText : p2ScoreText).textContent = `Score: ${sc}`;
 
@@ -321,21 +366,51 @@ async function hit(){
     pl.done = true;
     hitBtn.disabled = true;
     standBtn.disabled = true;
-    if(allPlayersDone()) await dealerPlayAndResolve();
-    else if(playerCount===2 && currentPlayerIndex===0){
-      currentPlayerIndex=1;
-      enablePlayerControlsFor(1);
-      showMessage(`Player 2's turn — Hit or Stand.`);
+    // if player had a split and hasn't played the second hand yet, move to the split hand
+    if(pl.split && !pl.split.played){
+      pl.split.played = true;
+      pl._playingSplitSecond = true;
+      // switch to the split hand
+      pl.hand = pl.split.hand;
+      pl.bet = pl.split.bet;
+      pl.done = false;
+      renderPlayerHands(currentPlayerIndex);
+      enablePlayerControlsFor(currentPlayerIndex);
+      showMessage(`Player ${currentPlayerIndex+1} — playing split hand.`);
+    } else {
+      if(allPlayersDone()) await dealerPlayAndResolve();
+      else if(playerCount===2 && currentPlayerIndex===0){
+        currentPlayerIndex=1;
+        enablePlayerControlsFor(1);
+        showMessage(`Player 2's turn — Hit or Stand.`);
+      }
     }
   }
   saveState();
 }
 
 async function stand(){
-  players[currentPlayerIndex].done = true;
+  const pl = players[currentPlayerIndex];
   showMessage(`Player ${currentPlayerIndex+1} stands.`);
   hitBtn.disabled = true;
   standBtn.disabled = true;
+
+  // If player has a split and hasn't played the second hand yet, switch to it
+  if(pl.split && !pl.split.played){
+    pl.split.played = true;
+    pl._playingSplitSecond = true;
+    pl.hand = pl.split.hand;
+    pl.bet = pl.split.bet;
+    // allow actions on the second hand
+    pl.done = false;
+    renderPlayerHands(currentPlayerIndex);
+    enablePlayerControlsFor(currentPlayerIndex);
+    showMessage(`Player ${currentPlayerIndex+1} — playing split hand.`);
+    saveState();
+    return;
+  }
+
+  pl.done = true;
 
   if(playerCount===2 && currentPlayerIndex===0){
     currentPlayerIndex=1;
@@ -349,6 +424,71 @@ async function stand(){
 
 function allPlayersDone(){
   return players.slice(0,playerCount).every(p=>p.done);
+}
+
+function getHandDivForPlayer(i){
+  const base = i===0 ? player1HandDiv : player2HandDiv;
+  // primary-hand container
+  let primary = base.querySelector('.primary-hand');
+  if(!primary){ primary = document.createElement('div'); primary.className='primary-hand'; base.appendChild(primary); }
+  // if playing split second hand, return split container
+  const pl = players[i];
+  if(pl && pl._playingSplitSecond){
+    let splitDiv = base.querySelector('.split-hand');
+    if(!splitDiv){ splitDiv = document.createElement('div'); splitDiv.className='split-hand'; base.appendChild(splitDiv); }
+    return splitDiv;
+  }
+  return primary;
+}
+
+async function doubleDown(){
+  if(!roundActive) return;
+  const pl = players[currentPlayerIndex];
+  if(pl.bet<=0){ showMessage('You must place a bet first.'); return; }
+  if(pl.bankroll < pl.bet){ showMessage('Not enough to double.'); return; }
+  // take additional equal bet
+  pl.bankroll -= pl.bet;
+  pl.bet = pl.bet * 2;
+  updateDisplays(); updatePotUI(); saveState();
+  showMessage(`Player ${currentPlayerIndex+1} doubles down.`);
+  // draw exactly one card then stand
+  const card = draw();
+  pl.hand.push(card);
+  const target = getHandDivForPlayer(currentPlayerIndex);
+  await animateDeal(card, target);
+  const sc = calcHandValue(pl.hand);
+  (currentPlayerIndex===0 ? p1ScoreText : p2ScoreText).textContent = `Score: ${sc}`;
+  // mark done for this hand
+  pl.done = true;
+  hitBtn.disabled = true; standBtn.disabled = true; doubleBtn.disabled = true; splitBtn.disabled = true;
+  // if player has an unplayed split, move to it
+  if(pl.split && !pl.split.played){
+    pl.split.played = true; pl._playingSplitSecond = true; pl.hand = pl.split.hand; pl.bet = pl.split.bet; pl.done = false; renderPlayerHands(currentPlayerIndex); enablePlayerControlsFor(currentPlayerIndex); showMessage(`Player ${currentPlayerIndex+1} — playing split hand.`); saveState(); return;
+  }
+  if(allPlayersDone()) await dealerPlayAndResolve();
+  else if(playerCount===2 && currentPlayerIndex===0){ currentPlayerIndex=1; enablePlayerControlsFor(1); showMessage(`Player 2's turn — Hit or Stand.`); }
+  saveState();
+}
+
+function splitCurrentHand(){
+  if(!roundActive) return;
+  const pl = players[currentPlayerIndex];
+  if(!(pl.hand.length===2 && pl.hand[0].value===pl.hand[1].value)){ showMessage('Can only split matching ranks.'); return; }
+  if(pl.bankroll < pl.bet){ showMessage('Not enough to split.'); return; }
+  // create split: first card stays, second moves to split hand; place equal bet
+  const firstCard = pl.hand[0];
+  const secondCard = pl.hand[1];
+  pl.firstHand = [firstCard];
+  pl.firstBet = pl.bet;
+  pl.split = { hand: [secondCard], bet: pl.bet, played:false };
+  pl.bankroll -= pl.bet; // pay for the second hand
+  // set current active hand to first
+  pl.hand = pl.firstHand;
+  pl._playingSplitSecond = false;
+  renderPlayerHands(currentPlayerIndex);
+  updateDisplays(); updatePotUI(); saveState();
+  showMessage(`Player ${currentPlayerIndex+1} split into two hands.`);
+  enablePlayerControlsFor(currentPlayerIndex);
 }
 
 async function dealerPlayAndResolve(){
@@ -368,11 +508,31 @@ async function dealerPlayAndResolve(){
 
   for(let i=0;i<playerCount;i++){
     const pl = players[i];
-    const pScore = calcHandValue(pl.hand);
-    if(pScore>21){ pl.stats.losses++; playSound("lose"); continue; }
-    if(dScore>21 || pScore>dScore){ pl.stats.wins++; pl.bankroll+=pl.bet*2; animatePayout(i===0?p1BankDisplay:p2BankDisplay,pl.bet*2); playSound("win"); }
-    else if(pScore===dScore){ pl.stats.ties++; pl.bankroll+=pl.bet; animatePayout(i===0?p1BankDisplay:p2BankDisplay,pl.bet); playSound("tie"); }
-    else { pl.stats.losses++; playSound("lose"); }
+    const bankEl = i===0 ? p1BankDisplay : p2BankDisplay;
+    if(pl.split){
+      // evaluate first hand
+      const s1 = calcHandValue(pl.firstHand || []);
+      if(s1>21){ pl.stats.losses++; playSound("lose"); }
+      else if(dScore>21 || s1>dScore){ pl.stats.wins++; pl.bankroll += (pl.firstBet*2); animatePayout(bankEl, pl.firstBet*2); playSound("win"); }
+      else if(s1===dScore){ pl.stats.ties++; pl.bankroll += pl.firstBet; animatePayout(bankEl, pl.firstBet); playSound("tie"); }
+      else { pl.stats.losses++; playSound("lose"); }
+
+      // evaluate split hand
+      const s2 = calcHandValue(pl.split.hand || []);
+      if(s2>21){ pl.stats.losses++; playSound("lose"); }
+      else if(dScore>21 || s2>dScore){ pl.stats.wins++; pl.bankroll += (pl.split.bet*2); animatePayout(bankEl, pl.split.bet*2); playSound("win"); }
+      else if(s2===dScore){ pl.stats.ties++; pl.bankroll += pl.split.bet; animatePayout(bankEl, pl.split.bet); playSound("tie"); }
+      else { pl.stats.losses++; playSound("lose"); }
+
+      // cleanup split bookkeeping
+      pl.split = null; pl.firstHand = null; pl.firstBet = 0; pl._playingSplitSecond = false;
+    } else {
+      const pScore = calcHandValue(pl.hand);
+      if(pScore>21){ pl.stats.losses++; playSound("lose"); continue; }
+      if(dScore>21 || pScore>dScore){ pl.stats.wins++; pl.bankroll+=pl.bet*2; animatePayout(bankEl,pl.bet*2); playSound("win"); }
+      else if(pScore===dScore){ pl.stats.ties++; pl.bankroll+=pl.bet; animatePayout(bankEl,pl.bet); playSound("tie"); }
+      else { pl.stats.losses++; playSound("lose"); }
+    }
   }
 
   players.forEach(p=>p.bet=0);
@@ -394,6 +554,9 @@ nextPlayerBtn.addEventListener("click", ()=>{
     updateDisplays();
   }
 });
+
+doubleBtn.addEventListener('click', doubleDown);
+splitBtn.addEventListener('click', splitCurrentHand);
 
 resetBtn.addEventListener("click", resetRoundState);
 dealBtn.addEventListener("click", deal);
