@@ -58,7 +58,6 @@ const p2ScoreText = document.getElementById("player2-score");
 const dealBtn = document.getElementById("deal");
 const hitBtn = document.getElementById("hit");
 const standBtn = document.getElementById("stand");
-const resetBtn = document.getElementById("reset");
 const nextPlayerBtn = document.getElementById("next-player");
 const doubleBtn = document.getElementById("double");
 const splitBtn = document.getElementById("split");
@@ -70,6 +69,7 @@ const playerCountSelect = document.getElementById("player-count");
 const player2Area = document.getElementById("player2-area");
 const p1BankDisplay = document.getElementById("p1-bank");
 const p2BankDisplay = document.getElementById("p2-bank");
+const resetBtn = document.getElementById("reset");
 
 const winsText = document.getElementById("wins");
 const lossesText = document.getElementById("losses");
@@ -77,16 +77,24 @@ const tiesText = document.getElementById("ties");
 const clearStorageBtn = document.getElementById("clear-storage");
 
 // ---------------------------
-// Game state
+// Game state & constants
 // ---------------------------
+const GAME_CONFIG = {
+  INITIAL_BANKROLL: 500,
+  DEALER_MIN: 17,
+  AUTO_RESET_DELAY: 3000,
+  SOUND_COOLDOWN: 50  // ms between sound plays
+};
+
 let playerCount = Number(playerCountSelect ? playerCountSelect.value : 1);
 let currentPlayerIndex = 0;
 let players = [
-  { hand: [], bankroll: 500, bet: 0, stats: { wins:0, losses:0, ties:0 }, done: false },
-  { hand: [], bankroll: 500, bet: 0, stats: { wins:0, losses:0, ties:0 }, done: false }
+  { hand: [], bankroll: GAME_CONFIG.INITIAL_BANKROLL, bet: 0, stats: { wins:0, losses:0, ties:0 }, done: false },
+  { hand: [], bankroll: GAME_CONFIG.INITIAL_BANKROLL, bet: 0, stats: { wins:0, losses:0, ties:0 }, done: false }
 ];
 let dealer = { hand: [] };
 let roundActive = false;
+let lastSoundTime = {}; // Track last play time for each sound
 
 // ---------------------------
 // Persistence
@@ -128,6 +136,11 @@ function updateDisplays(){
   // re-render hands to ensure split UI is consistent
   renderPlayerHands(0);
   renderPlayerHands(1);
+  // Update active player highlighting
+  const p1Section = player1HandDiv.closest('.hand-section');
+  const p2Section = player2Area;
+  if(p1Section) p1Section.classList.toggle('active', roundActive && currentPlayerIndex === 0);
+  if(p2Section) p2Section.classList.toggle('active', roundActive && currentPlayerIndex === 1);
 }
 
 // render a player's hands (handles split UI)
@@ -256,6 +269,13 @@ function placeBetForPlayer(index, amount, sourceEl){
   if(roundActive){ showMessage("Round in progress — cannot bet now."); return; }
   const pl = players[index];
   if(amount > pl.bankroll){ showMessage("Not enough balance."); return; }
+  
+  // Check player turn in 2-player mode
+  if(playerCount === 2 && index !== currentPlayerIndex){
+    showMessage("Not your turn to bet. Press 'Next Player' to switch.");
+    return;
+  }
+
   pl.bet += amount;
   pl.bankroll -= amount;
   animateChip(sourceEl, amount);
@@ -263,6 +283,14 @@ function placeBetForPlayer(index, amount, sourceEl){
   updateDisplays();
   saveState();
   showMessage(`Player ${index+1} bet £${pl.bet}. Click Deal when ready.`);
+
+  // Disable chips if not enough bankroll
+  document.querySelectorAll(`.chips-row button[data-value]`).forEach(chip => {
+    const val = Number(chip.dataset.value);
+    const isCurrentPlayer = playerCount === 1 || 
+      (player2Area.contains(chip) ? index === 1 : index === 0);
+    chip.disabled = !isCurrentPlayer || val > pl.bankroll;
+  });
 }
 function updatePotUI(){
   const totalPot = players.reduce((s,p)=>s+p.bet,0);
@@ -273,7 +301,15 @@ function updatePotUI(){
 // Game flow
 // ---------------------------
 function resetRoundState(){
-  players.forEach(p => { p.hand = []; p.bet = 0; p.done = false; });
+  players.forEach(p => {
+    p.hand = [];
+    p.bet = 0;
+    p.done = false;
+    p.split = null;
+    p.firstHand = null;
+    p.firstBet = 0;
+    p._playingSplitSecond = false;
+  });
   dealer.hand = [];
   roundActive = false;
   currentPlayerIndex = 0;
@@ -288,7 +324,7 @@ function resetRoundState(){
   doubleBtn.disabled = true;
   splitBtn.disabled = true;
   nextPlayerBtn.disabled = playerCount<2;
-  resetBtn.disabled = true;
+  if(resetBtn) resetBtn.disabled = true;
   dealBtn.disabled = false;
   showMessage("Place your bets!");
   saveState();
@@ -296,7 +332,10 @@ function resetRoundState(){
 
 async function deal(){
   const anyBet = players.slice(0,playerCount).some(p=>p.bet>0);
-  if(!anyBet){ showMessage("Place a bet first."); return; }
+  if(!anyBet){ 
+    showMessage("Place a bet first."); 
+    return; 
+  }
   dealBtn.disabled = true;
   roundActive = true;
   createDeck();
@@ -330,7 +369,7 @@ async function deal(){
 
   currentPlayerIndex = 0;
   enablePlayerControlsFor(currentPlayerIndex);
-  resetBtn.disabled = false;
+  if(resetBtn) resetBtn.disabled = false;
   nextPlayerBtn.disabled = playerCount<2;
   showMessage(`Player 1's turn — Hit or Stand.`);
   saveState();
@@ -538,10 +577,14 @@ async function dealerPlayAndResolve(){
   players.forEach(p=>p.bet=0);
   updateDisplays();
   updatePotUI();
-  showMessage("Round over! Click Reset for the next round.");
+    showMessage(`Round over! Next round starts in ${GAME_CONFIG.AUTO_RESET_DELAY/1000} seconds...`);
   roundActive=false;
-  resetBtn.disabled=false;
+  if(resetBtn) resetBtn.disabled=false;
   saveState();
+  
+  // Auto-reset after a delay
+    await sleep(GAME_CONFIG.AUTO_RESET_DELAY);
+  resetRoundState();
 }
 
 // ---------------------------
@@ -558,7 +601,7 @@ nextPlayerBtn.addEventListener("click", ()=>{
 doubleBtn.addEventListener('click', doubleDown);
 splitBtn.addEventListener('click', splitCurrentHand);
 
-resetBtn.addEventListener("click", resetRoundState);
+
 dealBtn.addEventListener("click", deal);
 hitBtn.addEventListener("click", hit);
 standBtn.addEventListener("click", stand);
@@ -571,6 +614,7 @@ playerCountSelect.addEventListener("change", e=>{
 clearStorageBtn.addEventListener("click", ()=>{
   if(confirm("Clear saved data?")){ localStorage.removeItem("blackjack_state_v1"); location.reload(); }
 });
+// Event listeners
 document.addEventListener("click", e=>{
   const chip = e.target.closest(".chip");
   if(!chip) return;
@@ -578,6 +622,28 @@ document.addEventListener("click", e=>{
   let targetIndex = currentPlayerIndex;
   if(playerCount===2 && player2Area.contains(chip)) targetIndex=1;
   placeBetForPlayer(targetIndex,val,chip);
+});
+
+// Keyboard shortcuts
+document.addEventListener("keydown", e => {
+  if(!roundActive) return;
+  switch(e.key.toLowerCase()) {
+    case "h": 
+      if(!hitBtn.disabled) hit(); 
+      break;
+    case "s": 
+      if(!standBtn.disabled) stand(); 
+      break;
+    case "d": 
+      if(!doubleBtn.disabled) doubleDown(); 
+      break;
+    case "p": 
+      if(!splitBtn.disabled) splitCurrentHand(); 
+      break;
+    case "n": 
+      if(!nextPlayerBtn.disabled) nextPlayerBtn.click(); 
+      break;
+  }
 });
 function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 function showMessage(t){ messageText.textContent=t; }
@@ -594,10 +660,13 @@ const sounds = {
   click: new Audio("sounds/click.wav")
 };
 function playSound(name){
+  const now = Date.now();
+  if(lastSoundTime[name] && (now - lastSoundTime[name]) < GAME_CONFIG.SOUND_COOLDOWN) return;
   const s = sounds[name];
   if(!s) return;
   s.currentTime=0;
   s.play().catch(()=>{});
+  lastSoundTime[name] = now;
 }
 
 // Init
